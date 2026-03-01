@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>IVR Web Simulator</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#f0f0f0; }
+    .phone-container { width: 300px; margin: 40px auto; padding: 20px; background:#333; color:#fff; border-radius:10px; }
+    .phone-screen { height: 150px; background:#000; color:#0f0; padding:10px; overflow-y:auto; }
+    .keypad { display:grid; grid-template-columns: repeat(3,1fr); gap:5px; margin-top:10px; }
+    .key { padding:20px; font-size:18px; background:#666; color:#fff; border:none; border-radius:5px; cursor:pointer; }
+    #btnCall,#btnHangup { width:100%; padding:10px; margin-top:10px; font-size:16px; }
+  </style>
+</head>
+<body>
+  <div class="phone-container">
+    <div class="phone-screen" id="displayText">
+      <p>Press Start Call to begin</p>
+    </div>
+    <div class="keypad">
+      <button class="key" data-digit="1">1</button>
+      <button class="key" data-digit="2">2</button>
+      <button class="key" data-digit="3">3</button>
+      <button class="key" data-digit="4">4</button>
+      <button class="key" data-digit="5">5</button>
+      <button class="key" data-digit="6">6</button>
+      <button class="key" data-digit="7">7</button>
+      <button class="key" data-digit="8">8</button>
+      <button class="key" data-digit="9">9</button>
+      <button class="key" data-digit="*">*</button>
+      <button class="key" data-digit="0">0</button>
+      <button class="key" data-digit="#">#</button>
+    </div>
+    <button id="btnCall">📞 Start Call</button>
+    <button id="btnHangup" disabled>📵 Hang Up</button>
+  </div>
+
+  <script>
+    const baseUrl = 'http://localhost:3000';
+    let callState = {
+      active: false,
+      currentMenu: null,
+      sessionId: null,
+      inputBuffer: [],
+      callHistory: []
+    };
+
+    function displayPrompt(text) {
+      const displayDiv = document.getElementById('displayText');
+      const p = document.createElement('p');
+      p.textContent = `🔊 ${text}`;
+      p.className = 'ivr-prompt';
+      displayDiv.appendChild(p);
+      displayDiv.scrollTop = displayDiv.scrollHeight;
+    }
+
+    function showUserInput(digit) {
+      const displayDiv = document.getElementById('displayText');
+      const p = document.createElement('p');
+      p.textContent = `[You pressed: ${digit}]`;
+      p.className = 'user-input';
+      displayDiv.appendChild(p);
+      displayDiv.scrollTop = displayDiv.scrollHeight;
+    }
+
+    async function startCall() {
+      if (callState.active) return;
+      callState.active = true;
+      callState.sessionId = null;
+      callState.currentMenu = null;
+      callState.inputBuffer = [];
+
+      document.getElementById('btnCall').disabled = true;
+      document.getElementById('btnHangup').disabled = false;
+
+      // request new session
+      const res = await fetch(`${baseUrl}/session`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      const data = await res.json();
+      callState.sessionId = data.sessionId;
+      callState.currentMenu = data.providerInfo?.menu || 'main';
+      displayPrompt('Call started');
+    }
+
+    async function endCall() {
+      if (!callState.active) return;
+      await fetch(`${baseUrl}/session/${callState.sessionId}/end`, { method: 'POST' });
+      callState.active = false;
+      callState.sessionId = null;
+      callState.currentMenu = null;
+      document.getElementById('btnCall').disabled = false;
+      document.getElementById('btnHangup').disabled = true;
+      displayPrompt('Call ended. Press Start Call to try again.');
+    }
+
+    async function handleKeyPress(digit) {
+      if (!callState.active) return;
+      showUserInput(digit);
+      callState.inputBuffer.push(digit);
+
+      const res = await fetch(`${baseUrl}/session/${callState.sessionId}/input`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ digit, currentMenu: callState.currentMenu })
+      });
+      const resp = await res.json();
+      if (resp.prompt) displayPrompt(resp.prompt);
+      if (resp.menu) callState.currentMenu = resp.menu;
+      if (resp.action === 'hangup') {
+        displayPrompt(resp.message || 'Goodbye.');
+        endCall();
+      }
+    }
+
+    document.querySelectorAll('.key').forEach(button => {
+      button.addEventListener('click', () => {
+        const digit = button.getAttribute('data-digit');
+        console.log('Key pressed:', digit); // debug
+        handleKeyPress(digit);
+      });
+    });
+
+    document.getElementById('btnCall').addEventListener('click', startCall);
+    document.getElementById('btnHangup').addEventListener('click', endCall);
+  </script>
+</body>
+</html>
